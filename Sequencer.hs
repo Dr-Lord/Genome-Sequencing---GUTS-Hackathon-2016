@@ -3,10 +3,10 @@
 --   Author:
 --       Dr-Lord
 --   Version:
---       0.1 14/10/2016
+--       0.2 15/10/2016
 --
 --   Repository:
---       https://github.com/Dr-Lord/
+--       https://github.com/Dr-Lord/Genome-Sequencing---GUTS-Hackathon-2016
 --
 --   Description:
 --      This program takes in multiple randomised partitions of genomes generated
@@ -20,12 +20,28 @@
 --       3 - To Do
 --       4 - Main Functions
 --       5 - Other Functions
+--       6 - Unused Functions
 
 ---- 1 - IMPORTS AND TYPE DECLARATIONS -----------------------------------------
 
 import Data.List.Split as S (split, endsWith)
-import Data.List ((\\), union, delete)
+import Data.List ((\\), union, delete, intersect)
 
+
+type Edge = ((Int,Int),String)
+data Path = Path {eP1 :: Int, eP2 :: Int, eList :: [Edge]} deriving (Eq, Show, Read)
+
+    -- Make a Path out of an Edge
+pathify :: Edge -> Path
+pathify (e@((a,b),_)) = Path a b [e]
+
+    -- Prepend or append a (guaranteed to be) linkable edge to a list of ordered edges
+correctlyConcat :: Edge -> Path -> Path
+correctlyConcat (e@((a,b),s)) el
+    | a == eP2 el = Path (eP1 el) b (eList el ++ [e])
+    | b == eP1 el = Path a (eP2 el) ((:) e $ eList el)
+    | otherwise   = error "This should never happen!!!"
+    
 
 
 ---- 2 - TESTING STUFF ---------------------------------------------------------
@@ -34,6 +50,7 @@ import Data.List ((\\), union, delete)
 
 ---- 3 - TO DO -----------------------------------------------------------------
 
+-- FINAL PASS TO REMOVE UNUSED FUNCTIONS
 
 
 ---- 4 - MAIN FUNCTIONS --------------------------------------------------------
@@ -70,30 +87,60 @@ main = do
         -- partition-X element on a boundary (the set of remaining partition-X elements decreases every step)
         -- NOTE: Cater for possibility of current incompletability (all possibility sets are greater than one for a full pass)
         -- PERHAPS it would be useful to sort the yPartXed list by decreasing total original length of chunks
-joinAdjacents :: [[String]] -> [String] -> [String]
-joinAdjacents yPartXed []    = yPartXed
-joinAdjacents yPartXed xPart = joinAdjacents' yPartXed xPart [] $ length yPartXed
-    where joinAdjacents' []       xp res _ = joinAdjacents res xp
-          joinAdjacents' (e:ypxd) xp res n = joinAdjacents' ypxd' (xp \\ (middleVals e)) res' n'
-            | length lAdjs == 0 && length rAdjs == 0 = 
-            | 
-            where ypxd' = ypxd \\ (le `union` re)
-                  res'  = [[lAdj] ++ e ++ [rAdj]]:(delete e res)
-                  n' = length ypxd' + length res'
-                  lAdjs = filter () allChunkss
-                  rAdjs = filter () allChunkss
-                  (l,r) = (head e, last e)
-                  allChunkss = ypxd ++ res
-                
-                
-    
-    pool = xPart \\ middles
-    (extrema, middles) = map extsAndMids yPartXed
-        -- And then just combine the exts in order to get pool items
+--joinAdjacents :: [[String]] -> [String] -> [String]   
+--joinAdjacents yPartXed []    = yPartXed
+--joinAdjacents yPartXed xPart =
+    --(pastedUpBits, remainingIndexedChunks) = foldl step ([], zip [0..] yPartXed) $ unzip linkingSnips 
+    --    where step :: ([String],[(Int,[String])]) -> (((Int,Int),String), String) -> ([String],[(Int,[String])])
+    --          step (acc,(i,strs)) ((a,b),snip) = (():acc,)
+              
+              
+--    (linkingSnips, remainingPool) = foldl step ([], pool) possSnips
+--        where step :: ([((Int,Int),String)], [String]) -> ((Int, Int), String) -> ([((Int,Int),String)], [String]) 
+--              step (curRes, curPool) absp@((a,b),snip)
+--                | snip `elem` curPool = (absp:curRes, delete snip curPool)
+--                | otherwise           = (curRes, curPool)
+--    possSnips = [((a,b),snip) | a <- inds, b <- inds, b /= a, let snip = (last $ extrema!!a) ++ (head $ extrema!!b)]
+--    inds = [0..(length extrema - 1)]
+--    pool = xPart \\ middles
+--    (extrema, middles) = map extsAndMids yPartXed
           
 
 
 ---- 5 - OTHER FUNCTIONS -------------------------------------------------------
+
+    -- Link up all possible substrings (using graph analogy: 'chunk-link-chunk's are edges, with chunks being points)
+        -- Adapted from my incomplete Travelling Salesman implementation from last year's hackathon, XD
+linkUpSubstrings :: [Edge] -> [Path]
+linkUpSubstrings = getNextPid []
+    where getNextPid :: [Path] -> [Edge] -> [Path]
+          getNextPid [] (e:es) = getNextPid [pathify e] es
+          getNextPid acc []    = acc
+          getNextPid accAcc@(acc:accs) ees@(e:es) =
+            case filter (pidsInCommon . getPids) ees of
+                []   -> getNextPid ((pathify e):accAcc) es
+                [ne] -> getNextPid ((correctlyConcat ne acc):accs) (delete ne es)
+                nes  -> error "Is this even possible?"
+                    -- NOTE: Is it possible to get two edges with the same point on the same side?
+            where getPids ((a,b),_) = [a, b]
+                  pidsInCommon = not. null . intersect [eP1 acc, eP2 acc]
+
+
+    -- Splits the second string into chunks ending with the first string
+splitOn :: String -> String -> [String]
+splitOn xs = S.split (S.endsWith xs)
+
+
+    -- Separates edge and middle elements of a list
+extsAndMids :: [a] -> ([a],[a])
+--extsAndMids [] = ([],[]) -- Should never happen
+extsAndMids l@[x]   = (l,[])
+extsAndMids l@[x,y] = (l,[])
+extsAndMids (x:xs)  = ([x, last xs], init xs)
+
+
+
+---- 6 - UNUSED FUNCTIONS ------------------------------------------------------
 
     -- True if the second string begins with the first string
 beginsWith :: String -> String -> Bool
@@ -107,9 +154,9 @@ endsWith xs ys = beginsWith ws zs
           zs = take (length xs) $ reverse ys
 
 
-    -- Splits the second string into chunks ending with the first string
-splitOn :: String -> String -> [String]
-splitOn xs = S.split (S.endsWith xs)
+    -- Delete nth lement of a list
+deleteNth :: Int -> [a] -> [a]
+deleteNth n xs = [ x | (ix, x) <- zip [0..] xs, ix /= n ]
 
 
     -- Returns all elements of a list except edge ones
@@ -118,11 +165,3 @@ middleVals :: [a] -> [a]
 middleVals [_] = []
 middleVals [_,_] = []
 middleVals (x:xs) = init xs
-
-
-    -- Separates edge and middle elements of a list
-extsAndMids :: [a] -> ([a],[a])
---extsAndMids [] = ([],[]) -- Should never happen
-extsAndMids l@[x]   = (l,[])
-extsAndMids l@[x,y] = (l,[])
-extsAndMids (x:xs)  = ([x, last xs], init xs)
