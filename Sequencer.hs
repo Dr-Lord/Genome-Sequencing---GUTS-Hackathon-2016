@@ -24,8 +24,9 @@
 
 ---- 1 - IMPORTS AND TYPE DECLARATIONS -----------------------------------------
 
-import Data.List.Split as S (split, endsWith)
-import Data.List ((\\), union, delete, intersect)
+import Data.List.Split (split, endsWith)
+import Data.List ((\\), union, delete, intersect, nubBy)
+import Data.Function (on)
 
 
 type Edge = ((Int,Int),String)
@@ -62,16 +63,43 @@ main = do
     let tags = ["BC", "DE", "EDA", "DFAD"]
     partitionsStrs <- mapM readFile $ map (prefix++) tags
     let partitions = map (read :: String -> [String]) partitionsStrs
+    --putStrLn . show $ map (!!0) partitions
+    
     
     -- Check all of same length
-    let allSame = map (sum . map length) partitions
-    putStrLn $ show allSame
+    --let allSame = map (sum . map length) partitions
+    --putStrLn $ show allSame
+    
+    
+    let xPart = partitions!!0
+    let yPart = partitions!!1
+    let yPartXed = map (splitOn (tags!!0)) yPart
+    
+    putStrLn . show $ xPart
+    
+    let (newPartitions,endString) = removeGenomeEnd partitions tags
+    
+    putStrLn . show $ endString
+    
+    
+    let (joinedPaths, remainingPool) = joinAdjacents yPartXed xPart
+    let joinedStrings = map (stringify yPart) joinedPaths
+    
+    putStrLn "\n\nRESULTS:\n"
+    putStrLn $ show joinedStrings
+    putStrLn $ show remainingPool
+    putStrLn . show $ sum . map length $ joinedStrings ++ remainingPool
+    putStrLn . show $ filter (\x-> length x == 97) remainingPool
+    
+    if remainingPool == xPart then putStrLn "No progress was made" else putStrLn "SOME PROGRESS WAS MADE!!"
+    
+    
     
     -- Look for one partitions' parts inside all other partitions' parts
         -- Split at all tags (one at a time) and compare/expand largest matches
         -- Perhaps all the pairings are not necessary; just incrementally work on the confirmed substrings
-    let pairings = [(x,y) | x <- [0..3], y <- [0..3], x /= y]
-    putStrLn $ show pairings
+    --let pairings = [(x,y) | x <- [0..3], y <- [0..3], x /= y]
+    --putStrLn $ show pairings
     
     
     
@@ -83,31 +111,34 @@ main = do
 
     -- Join a partitioned-by-tag-X partition-Y element with adjacent partition-Y elements
     -- by looking for split partition-X elements on bondaries
+    -- Returns a list of paths
         -- NOTE: Ignore and redo at end instances where there is more than one possible split
         -- partition-X element on a boundary (the set of remaining partition-X elements decreases every step)
         -- NOTE: Cater for possibility of current incompletability (all possibility sets are greater than one for a full pass)
         -- PERHAPS it would be useful to sort the yPartXed list by decreasing total original length of chunks
---joinAdjacents :: [[String]] -> [String] -> [String]   
---joinAdjacents yPartXed []    = yPartXed
---joinAdjacents yPartXed xPart =
-    --(pastedUpBits, remainingIndexedChunks) = foldl step ([], zip [0..] yPartXed) $ unzip linkingSnips 
-    --    where step :: ([String],[(Int,[String])]) -> (((Int,Int),String), String) -> ([String],[(Int,[String])])
-    --          step (acc,(i,strs)) ((a,b),snip) = (():acc,)
-              
-              
---    (linkingSnips, remainingPool) = foldl step ([], pool) possSnips
---        where step :: ([((Int,Int),String)], [String]) -> ((Int, Int), String) -> ([((Int,Int),String)], [String]) 
---              step (curRes, curPool) absp@((a,b),snip)
---                | snip `elem` curPool = (absp:curRes, delete snip curPool)
---                | otherwise           = (curRes, curPool)
---    possSnips = [((a,b),snip) | a <- inds, b <- inds, b /= a, let snip = (last $ extrema!!a) ++ (head $ extrema!!b)]
---    inds = [0..(length extrema - 1)]
---    pool = xPart \\ middles
---    (extrema, middles) = map extsAndMids yPartXed
+joinAdjacents :: [[String]] -> [String] -> ([Path], [String])
+joinAdjacents yPartXed xPart = (linkedBits, remainingPool) 
+    where linkedBits = linkUpSubstrings linkingSnips 
+          (linkingSnips, remainingPool) = foldl step ([], pool) possSnips
+            where step :: ([Edge], [String]) -> Edge -> ([Edge], [String]) 
+                  step (curRes, curPool) absp@(_,snip)
+                    | snip `elem` curPool = (absp:curRes, delete snip curPool)
+                    | otherwise           = (curRes, curPool)
+          possSnips = [((a,b),snip) | a <- inds, b <- inds, b /= a, let snip = (last $ extrema!!a) ++ (head $ extrema!!b)]
+          --possSnips = edgeNub [((a,b),snip) | a <- inds, b <- inds, b /= a, let snip = (last $ extrema!!a) ++ (head $ extrema!!b)]
+          inds = [0..length extrema - 1]
+          pool = (xPart \\) . concat $ extrema ++ middles
+          (extrema, middles) = unzip $ map extsAndMids yPartXed
           
 
 
 ---- 5 - OTHER FUNCTIONS -------------------------------------------------------
+
+    -- Turn a Path into a String
+stringify :: [String] -> Path -> String
+stringify yPart (Path _ _ (((w,z),str):es)) = foldl joinUp (yPart!!w ++ str ++ yPart!!z) es
+    where joinUp acc ((_,b),s) = acc ++ s ++ yPart!!b
+
 
     -- Link up all possible substrings (using graph analogy: 'chunk-link-chunk's are edges, with chunks being points)
         -- Adapted from my incomplete Travelling Salesman implementation from last year's hackathon, XD
@@ -126,9 +157,24 @@ linkUpSubstrings = getNextPid []
                   pidsInCommon = not. null . intersect [eP1 acc, eP2 acc]
 
 
+
+    -- Remove the end of the genome from all partitions and preserve the longest one
+removeGenomeEnd :: [[String]] -> [String] -> ([[String]], String)
+removeGenomeEnd allPartitions allTags = foldr step ([],"") [0..3]
+    where step n (aPs,curEndStr) = case filter (not . endsWithStr aTag) aPart of
+                                    [s] -> if length s > length curEndStr
+                                            then ((delete s aPart):aPs, s)
+                                            else (aPart, curEndStr)
+                                    _   -> (aPart, curEndStr)
+                                    where aTag = tags!!n
+                                          aPart = allPartitions!!n
+                                          
+                                          -- Then walk backwards!!!
+            
+
     -- Splits the second string into chunks ending with the first string
 splitOn :: String -> String -> [String]
-splitOn xs = S.split (S.endsWith xs)
+splitOn xs = split (endsWith xs)
 
 
     -- Separates edge and middle elements of a list
@@ -139,19 +185,27 @@ extsAndMids l@[x,y] = (l,[])
 extsAndMids (x:xs)  = ([x, last xs], init xs)
 
 
-
----- 6 - UNUSED FUNCTIONS ------------------------------------------------------
-
     -- True if the second string begins with the first string
-beginsWith :: String -> String -> Bool
-beginsWith xs = (==) xs . take (length xs)
+beginsWithStr :: String -> String -> Bool
+beginsWithStr xs = (==) xs . take (length xs)
 
 
     -- True if the second string ends with the first string
-endsWith :: String -> String -> Bool
-endsWith xs ys = beginsWith ws zs
+endsWithStr :: String -> String -> Bool
+endsWithStr xs ys = beginsWithStr ws zs
     where ws = reverse xs
           zs = take (length xs) $ reverse ys
+
+
+
+---- 6 - UNUSED FUNCTIONS ------------------------------------------------------
+
+    -- Short circuit nub for Edge lists
+edgeNub :: [Edge] -> [Edge]
+edgeNub = nubBy ((==) `on` fst)
+
+
+
 
 
     -- Delete nth lement of a list
