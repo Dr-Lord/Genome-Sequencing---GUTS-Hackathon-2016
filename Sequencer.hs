@@ -24,9 +24,8 @@
 
 ---- 1 - IMPORTS AND TYPE DECLARATIONS -----------------------------------------
 
-import Data.List.Split (split, endsWith, endsWithOneOf)
-import Data.List (isSuffixOf, inits, (\\), union, delete, intersect, nubBy, sortBy, tails)
-import Data.Function (on)
+import Data.List.Split (split, endsWith)
+import Data.List (isPrefixOf, isSuffixOf, inits, tails, delete)
 
 
 
@@ -37,6 +36,9 @@ import Data.Function (on)
 ---- 3 - TO DO -----------------------------------------------------------------
 
 -- FINAL PASS TO REMOVE UNUSED FUNCTIONS AND IMPORTS
+
+-- MAKE THE PROGRAM FASTER BY CHECKING THE END-TAG OF THE CURRENT LAST ACCUMULATOR-INIT STRING AND THEN ONLY CHECKING FOR
+-- LISTS ENDING IN IT WITHIN THAT TAG'S PARTITION
 
 
 ---- 4 - MAIN FUNCTIONS --------------------------------------------------------
@@ -50,8 +52,11 @@ main = do
     let genomeLengths = [1000, 10000, 100000, 1000000]
     let tags = ["BC", "DE", "EDA", "DFAD"]
 
+        -- Tag subtractions resulting from adjacent tags
+    let subtractedTags = ["E", "DA"]
+
         -- SET THIS VALUE TO CHANGE GENOME
-    let genomeIndex = 1
+    let genomeIndex = 2
 
     partitionsStrs <- mapM readFile $ [pathPrefix ++ x ++ pathInfix ++ y | let x = genomes!!genomeIndex, y <- tags]
         -- Interpret the files as lists of strings
@@ -72,29 +77,41 @@ main = do
     
     
         -- Partition each partition further by splitting on all tags
-    let allFullySplit = [ [splitOnAll (delete (tags!!x) tags) y | y <- newPartitions!!x] | x <- [0..3] ]
+    let allFullySplit = [ [splitOnAll (delete (tags!!i) tags) s | s <- newPartitions!!i] | i <- [0..3] ]
+        -- Partition each partition further if adjacent tags caused undetected split-points at the beginning of strings
+    let allSafelySplit = [ [ concat [splitOnInitialTags subtractedTags s | s <- ss] | ss <- p] | p <- allFullySplit]
         -- Length one sublists cannot contribute to the sequencing
-    let joinedPools = filter ((/= 1) . length) $ concat allFullySplit 
+    let joinedPools = filter ((/= 1) . length) $ concat allSafelySplit 
         -- Split the endstring on all tags too
-    let startList = splitOnAll tags endString
+    let startList = concatMap (splitOnInitialTags subtractedTags) $ splitOnAll tags endString
     
     --putStrLn . ("Initial endstring: " ++) . show $ startList
 
         -- Sequence the genome and return it as a list of substring (ending in any tag); also return the remaining pool
-    --let (res, newPool) = alignAndJoinWithOverlapFast 1 startList joinedPools
     let (res, newPool) = alignAndJoinDeterministic (genomeLengths!!genomeIndex) startList joinedPools
+    let (resF, newPoolF) = alignAndJoinWithOverlapFast 1 startList joinedPools
+    putStrLn . ("Fast result ends with deterministic result: " ++) . show $ length $ takeWhile (\(x,y)->x==y) $ zip (reverse res) (reverse resF)
+    putStrLn . ("Common ends of results: " ++) . show $ map (take 5 . drop 316 . reverse) [res, resF]
     
     putStrLn "\n\nRESULTS:\n"
     putStrLn . ("Length of final result: " ++) . show $ sum $ map length res
-    --putStrLn . ("Final result: " ++) . show $ res
-    putStrLn . ("Pool elements containing first element of result: " ++) . show $ filter ("FFFBDCEABDBFDACFCDFCCBACEFEADCBAEACAAFBADCCADCAAEFEEFACDE" `elem`) newPool
+    putStrLn . ("Final result beginning: " ++) . show $ take 5 res
 
-    putStrLn . ("\n\nThe result ends with the endstring: " ++ ) . show $ isSuffixOf startList res
+    putStrLn . ("\n\nThe result ends with the endstring: " ++ ) . show $ startList `isSuffixOf` res
     
     putStrLn . ("\nRemaining pool size: " ++) . show $ length newPool
     putStrLn . ("Remaining pool total length: " ++) . show $ sum $ map (sum . map length) newPool
+    --putStrLn . ("Remaining pool: " ++) . show $ take 5 res
 
 
+
+
+    -- Split a string once on any of the given tags if it begins with one of them
+splitOnInitialTags :: [String] -> String -> [String]
+splitOnInitialTags []     str = [str]
+splitOnInitialTags (t:ts) str
+    | t `isPrefixOf` str = if t == str then [str] else [t, drop (length t) str]
+    | otherwise          = splitOnInitialTags ts str
 
 
     -- Progressively align and merge lists of strings to a given end sequence
@@ -104,7 +121,7 @@ alignAndJoinDeterministic targetLength startLs joinedPools = alAndJoin (startLs,
     where maxSubLen = maximum $ map length joinedPools
           alAndJoin :: ([String],[[String]]) -> [(Int,[String])]-> ([String],[[String]])
           alAndJoin out               []                     = out
-          alAndJoin out@(acc,curPool) ((overlap,curInit):xs) = case filter (curInit `isSuffixOf`) curPool of
+          alAndJoin out@(acc,curPool) ((overlap,curInit):xs) = case filter (curInit `isSuffixOf`) curPool of -- No need to optimize filter for plausible lengths; isSuffixOf already does that
                 [match] -> let newAcc = match ++ drop overlap acc in if length newAcc >= targetLength
                             then (newAcc, delete match curPool)
                             else alAndJoin (newAcc, delete match curPool) $ overlapsAndInits maxSubLen newAcc
